@@ -1,0 +1,25 @@
+Kernel: https://github.com/LineageOS/android_kernel_xiaomi_sdm845
+Branch: lineage-21
+Commit: 88606771eef343b0a2158de455a9537fba17b2f2
+KernelSU Next: https://github.com/KernelSU-Next/KernelSU-Next
+Tag: v1.0.9
+Commit: 2241696498ce9dd742ce80b52c3ed6cca26e03ea
+Embedded daemon: lib/arm64-v8a/libksud_overlayfs.so from KernelSU_Next_v1.0.9_12797-release.apk
+AnyKernel3: https://github.com/osm0sis/AnyKernel3
+Commit: 41f04bdb4ee30a44e429c2c1131d5e8bb32b15f1
+Toolchain: Ubuntu clang 18.1.3; GNU binutils 2.42; GCC cross toolchains 13.3
+
+
+RAW changes: static exec/read/access/stat/input hooks, KPROBES disabled, msm_performance restored, CONFIG_NOCI_RAW_PERF bandwidth policy.
+Root integration reference: https://kernelsu-next.github.io/webpage/pages/how-to-integrate-for-non-gki.html
+Uploaded boot.emmc.win used only for audit/repack validation. Its Image, ramdisk and DTBs are not shipped.
+
+Parent: Singularity RAW R2, user-confirmed boot on PixelOS 14.0 derveror 2024-08-20.
+#1 changes: automatic policy-max CPU touch boost (120ms duration, 80ms interval), boost ceiling clamp, BW hwmon 4ms and 100% rising-traffic scale, release branding and build number 1.
+Kernel source/DTB/clock tables and KernelSU driver pins unchanged from the booted parent.
+R2 kernel/DTB packaging fix retained: payload is the source-built Image.gz-dtb.
+No uploaded ROM/boot/ramdisk/DTB is redistributed.
+Recipe: bash build-kernel.sh raw; cp out/.config CONFIG.final; python3 package-kernel.py raw
+Toolchain: LLVM 18.1.3; packages and extraction recipe recorded in TOOLCHAIN.txt and fetch-tools.py.
+
+DTB_ORDER.txt preserves the exact order of all 26 source-built DTBs from the boot-confirmed R2. pair-dtbs.py verifies the full compiled board set before ordering.

@@ -1,0 +1,284 @@
+--- a/kernel/drivers/cpufreq/cpu-boost.c
++++ b/kernel/drivers/cpufreq/cpu-boost.c
+@@ -36,7 +36,11 @@
+ 
+ static bool input_boost_enabled;
+ 
++#ifdef CONFIG_NOCI_RAW_PERF
++static unsigned int input_boost_ms = 120;
++#else
+ static unsigned int input_boost_ms = 40;
++#endif
+ module_param(input_boost_ms, uint, 0644);
+ 
+ static unsigned int sched_boost_on_input;
+@@ -46,7 +50,11 @@
+ 
+ static struct delayed_work input_boost_rem;
+ static u64 last_input_time;
++#ifdef CONFIG_NOCI_RAW_PERF
++#define MIN_INPUT_INTERVAL (80 * USEC_PER_MSEC)
++#else
+ #define MIN_INPUT_INTERVAL (150 * USEC_PER_MSEC)
++#endif
+ 
+ static int set_input_boost_freq(const char *buf, const struct kernel_param *kp)
+ {
+@@ -137,7 +145,13 @@
+ 			 cpu, policy->min);
+ 		pr_debug("CPU%u boost min: %u kHz\n", cpu, ib_min);
+ 
++#ifdef CONFIG_NOCI_RAW_PERF
++		/* Boost within the current policy ceiling, including thermal caps. */
++		ib_min = min(ib_min, policy->max);
++		cpufreq_verify_within_limits(policy, ib_min, policy->max);
++#else
+ 		cpufreq_verify_within_limits(policy, ib_min, UINT_MAX);
++#endif
+ 
+ 		pr_debug("CPU%u policy min after boost: %u kHz\n",
+ 			 cpu, policy->min);
+@@ -326,6 +340,17 @@
+ 	for_each_possible_cpu(cpu) {
+ 		s = &per_cpu(sync_info, cpu);
+ 		s->cpu = cpu;
++#ifdef CONFIG_NOCI_RAW_PERF
++		{
++			struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
++
++			if (policy) {
++				s->input_boost_freq = policy->cpuinfo.max_freq;
++				input_boost_enabled = true;
++				cpufreq_cpu_put(policy);
++			}
++		}
++#endif
+ 	}
+ 	cpufreq_register_notifier(&boost_adjust_nb, CPUFREQ_POLICY_NOTIFIER);
+ 
+--- a/kernel/drivers/devfreq/governor_bw_hwmon.c
++++ b/kernel/drivers/devfreq/governor_bw_hwmon.c
+@@ -771,8 +771,8 @@
+ gov_attr(io_percent, 1U, 100U);
+ gov_attr(bw_step, 50U, 1000U);
+ #ifdef CONFIG_NOCI_RAW_PERF
+-gov_attr(sample_ms, 1U, 8U);
+-gov_attr(up_scale, 50U, 500U);
++gov_attr(sample_ms, 1U, 4U);
++gov_attr(up_scale, 100U, 500U);
+ #else
+ gov_attr(sample_ms, 1U, 50U);
+ gov_attr(up_scale, 0U, 500U);
+@@ -934,9 +934,9 @@
+ 	node->decay_rate = 90;
+ 	node->io_percent = 16;
+ 	node->bw_step = 190;
+-	#ifdef CONFIG_NOCI_RAW_PERF
+-	node->sample_ms = 8;
+-	node->up_scale = 50;
++#ifdef CONFIG_NOCI_RAW_PERF
++	node->sample_ms = 4;
++	node->up_scale = 100;
+ #else
+ 	node->sample_ms = 50;
+ 	node->up_scale = 0;
+--- a/kernel/arch/arm64/configs/vendor/xiaomi/singularity.config
++++ b/kernel/arch/arm64/configs/vendor/xiaomi/singularity.config
+@@ -1,4 +1,4 @@
+-CONFIG_LOCALVERSION="-Singularity-v1-RAW"
++CONFIG_LOCALVERSION="-Singularity-v1"
+ # CONFIG_LOCALVERSION_AUTO is not set
+ CONFIG_KSU=y
+ # CONFIG_KSU_KPROBES_HOOK is not set
+--- a/build-kernel.sh
++++ b/build-kernel.sh
+@@ -3,6 +3,7 @@
+ export ARCH=arm64 SUBARCH=arm64
+ export CROSS_COMPILE=${CROSS_COMPILE:-aarch64-linux-gnu-} CROSS_COMPILE_ARM32=${CROSS_COMPILE_ARM32:-arm-linux-gnueabi-}
+ export KBUILD_BUILD_USER=ProjectNoci KBUILD_BUILD_HOST=Singularity
++export KBUILD_BUILD_VERSION=1
+ export KBUILD_BUILD_TIMESTAMP='Fri Oct 30 00:00:00 UTC 2026'
+ case "${1:-raw}" in
+  raw) fragment=vendor/xiaomi/singularity.config;;
+@@ -12,3 +13,4 @@
+ make -C kernel O=../out CC=clang HOSTCC=gcc LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- vendor/xiaomi/mi845_defconfig vendor/xiaomi/polaris.config "$fragment"
+ make -C kernel O=../out CC=clang HOSTCC=gcc LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
+ make -C kernel O=../out -j"${JOBS:-8}" CC=clang HOSTCC=gcc LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- Image.gz-dtb
++python3 pair-dtbs.py
+--- a/anykernel/anykernel.sh
++++ b/anykernel/anykernel.sh
+@@ -1,6 +1,6 @@
+ #!/sbin/sh
+ properties() { '
+-kernel.string=Singularity v1 @ProjectNoci
++kernel.string=Singularity v1 @ProjectNoci #1
+ do.devicecheck=1
+ do.modules=0
+ do.systemless=0
+@@ -16,9 +16,9 @@
+ RAMDISK_COMPRESSION=auto;
+ PATCH_VBMETA_FLAG=auto;
+ . tools/ak3-core.sh;
+-ui_print "Singularity v1 @ProjectNoci";
++ui_print "Singularity v1 @ProjectNoci #1";
+ ui_print "Mi MIX 2S | polaris | Android 13+ AOSP | 4.9";
+-ui_print "R2 | matched kernel + Polaris DTB";
++ui_print "Gaming | KSU Next | matched Polaris DTB";
+ . "$AKHOME/tools/noci-compat.sh";
+ noci_check_payload;
+ split_boot;
+--- a/package-kernel.py
++++ b/package-kernel.py
+@@ -17,7 +17,7 @@
+ end = image.index(b'IKCFG_ED',start)
+ config = root/('CONFIG.final' if args.profile=='raw' else 'CONFIG.baseline')
+ assert zlib.decompress(image[start:end],31) == config.read_bytes()
+-name = 'RAW_R2_DTB_KSUN' if args.profile=='raw' else 'BASELINE_R2_DTB'
++name = 'Gaming_1_KSUN' if args.profile=='raw' else 'BASELINE_R2_DTB'
+ dest = root/'deliverables'/f'Singularity_v1_ProjectNoci_polaris_{name}.zip'
+ dest.parent.mkdir(exist_ok=True)
+ with zipfile.ZipFile(dest,'w',zipfile.ZIP_DEFLATED,compresslevel=6) as out:
+--- a/tests/test_bus_policy.py
++++ b/tests/test_bus_policy.py
+@@ -15,7 +15,7 @@
+ }
+ int main(void) {
+  struct node n={.prev_req=400,.hist_max_mbps=2000,.up_scale=SCALE,.wake=UP_WAKE};
+- assert(vote(&n,800,1200)==1000);
++ assert(vote(&n,800,1200)==1200);
+  assert(vote(&n,800,900)==900);
+  n.hist_max_mbps=900;assert(vote(&n,800,1200)==900);
+  n.prev_req=1200;assert(vote(&n,800,1200)==800);
+--- a/tests/test_flash_flow.py
++++ b/tests/test_flash_flow.py
+@@ -51,7 +51,7 @@
+ do_devicecheck
+ . ./anykernel.sh
+ '''
+-  env=dict(os.environ,AKHOME=str(p),NOCI_ANDROID_SDK='34',NOCI_ANDROID_RELEASE='14',CASE=case,NO_MAGISK_CHECK='1',QEMU=str(root.parent/'raw_tools/usr/bin/qemu-arm-static'),MAGISKBOOT=str(ak/'tools/magiskboot'))
++  env=dict(os.environ,AKHOME=str(p),NOCI_ANDROID_SDK='34',NOCI_ANDROID_RELEASE='14',CASE=case,NO_MAGISK_CHECK='1',QEMU=os.environ.get('QEMU_ARM',str(root.parent/'final_tools/usr/bin/qemu-arm-static')),MAGISKBOOT=str(ak/'tools/magiskboot'))
+   r=subprocess.run(['bash','-c',script],cwd=p,env=env,capture_output=True,text=True)
+   assert (p/'split_img/ramdisk.cpio').read_bytes()==b'ORIGINAL_RAMDISK'
+   if case not in ['missing_dtb','valid','oversize','repack_fail']:assert (p/'split_img/kernel_dtb').read_bytes()==b'ORIGINAL_DTB'
+--- a/tests/test_repack_reference.py
++++ b/tests/test_repack_reference.py
+@@ -1,7 +1,7 @@
+ from pathlib import Path
+ import os,subprocess,shutil,struct,tempfile
+ root=Path(__file__).resolve().parents[1];outer=root.parent
+-qemu=Path(os.environ.get('QEMU_ARM',str(outer/'raw_tools/usr/bin/qemu-arm-static')));mb=root/'anykernel/tools/magiskboot'
++qemu=Path(os.environ.get('QEMU_ARM',str(outer/'final_tools/usr/bin/qemu-arm-static')));mb=root/'anykernel/tools/magiskboot'
+ fixture=Path(tempfile.mkdtemp(prefix='r2-repack-',dir=outer))
+ (fixture/'tools').mkdir()
+ shutil.copy2(root/'anykernel/anykernel.sh',fixture/'anykernel.sh')
+--- a/tests/verify_artifact.py
++++ b/tests/verify_artifact.py
+@@ -27,7 +27,8 @@
+ assert '# CONFIG_BUILD_ARM64_DT_OVERLAY is not set' in cfg
+ assert 'Singularity-v1' in (root/'out/include/config/kernel.release').read_text()
+ subprocess.run(['sh','-n',str(root/'anykernel/anykernel.sh')],check=True)
+-zips=list((root/'deliverables').glob('*polaris_RAW_R2*.zip'))
++zips=list((root/'deliverables').glob('*polaris_Gaming_1*.zip'))
++assert zips,'Final flashable ZIP is missing'
+ for f in zips:
+  with zipfile.ZipFile(f) as z:
+   assert z.testzip() is None
+--- a/tests/test_input_boost.py
++++ b/tests/test_input_boost.py
+@@ -0,0 +1,39 @@
++from pathlib import Path
++import re,subprocess,tempfile
++root=Path(__file__).resolve().parents[1]
++source=(root/'kernel/drivers/cpufreq/cpu-boost.c').read_text()
++fn=re.search(r'static int boost_adjust_notify\(.*?\n\}',source,re.S).group()
++header=(root/'kernel/include/linux/cpufreq.h').read_text()
++verify=re.search(r'static inline void cpufreq_verify_within_limits\(.*?\n\}',header,re.S).group()
++c='''#include <assert.h>
++#include <limits.h>
++#define CONFIG_NOCI_RAW_PERF 1
++#define CPUFREQ_ADJUST 1
++#define NOTIFY_OK 0
++#define pr_debug(...) do {} while(0)
++#define min(a,b) ((a)<(b)?(a):(b))
++struct notifier_block {int unused;};
++struct cpufreq_policy {unsigned int cpu,min,max;};
++struct cpu_sync {unsigned int input_boost_min;};
++static struct cpu_sync sync_info[8];
++#define per_cpu(name,cpu) name[cpu]
++'''+verify+'\n'+fn+'''
++int main(void) {
++ struct cpufreq_policy p={.cpu=4,.min=300000,.max=1209600};
++ sync_info[4].input_boost_min=2803200;
++ boost_adjust_notify(0,CPUFREQ_ADJUST,&p);
++ assert(p.min==1209600 && p.max==1209600);
++ p.min=300000;p.max=2803200;sync_info[4].input_boost_min=2400000;
++ boost_adjust_notify(0,CPUFREQ_ADJUST,&p);
++ assert(p.min==2400000 && p.max==2803200);
++ p.min=300000;sync_info[4].input_boost_min=0;
++ boost_adjust_notify(0,CPUFREQ_ADJUST,&p);
++ assert(p.min==300000 && p.max==2803200);
++ return 0;
++}
++'''
++with tempfile.TemporaryDirectory() as d:
++ p=Path(d);(p/'t.c').write_text(c)
++ subprocess.run(['gcc','-Wall','-Werror',str(p/'t.c'),'-o',str(p/'t')],check=True)
++ subprocess.run([str(p/'t')],check=True)
++print('PASS: input boost reaches requested floor, respects policy cap, and ignores an inactive boost')
+--- a/pair-dtbs.py
++++ b/pair-dtbs.py
+@@ -0,0 +1,25 @@
++#!/usr/bin/env python3
++"""Keep the source-built DTB order of the boot-confirmed Polaris R2 package."""
++from pathlib import Path
++from collections import Counter
++import struct,zlib
++
++root=Path(__file__).resolve().parent
++out=root/'out/arch/arm64/boot'
++payload=out/'Image.gz-dtb'
++decoder=zlib.decompressobj(31)
++decoder.decompress(payload.read_bytes());decoder.flush()
++rest=decoder.unused_data
++original=[]
++while rest:
++    assert rest[:4]==b'\xd0\x0d\xfe\xed'
++    size=struct.unpack('>I',rest[4:8])[0]
++    assert 40<=size<=len(rest)
++    original.append(rest[:size]);rest=rest[size:]
++names=(root/'DTB_ORDER.txt').read_text().splitlines()
++assert len(names)==len(set(names))
++assert all(not Path(n).is_absolute() and '..' not in Path(n).parts for n in names)
++ordered=[(out/'dts'/name).read_bytes() for name in names]
++assert Counter(original)==Counter(ordered),'Compiled DTBs differ from the expected board set'
++payload.write_bytes((out/'Image.gz').read_bytes()+b''.join(ordered))
++print('Paired',len(ordered),'compiled DTBs in the boot-confirmed board order')
+--- a/DTB_ORDER.txt
++++ b/DTB_ORDER.txt
+@@ -0,0 +1,26 @@
++qcom/polaris-p3.dtb
++qcom/sdm845-v2-mtp.dtb
++qcom/sdm845-sim.dtb
++qcom/polaris-p1-v2.dtb
++qcom/polaris-p0.dtb
++qcom/polaris-p2.dtb
++qcom/sdm845-v2-rumi.dtb
++qcom/sdm845-4k-panel-mtp.dtb
++qcom/polaris-p2-v2.1.dtb
++qcom/polaris-p0-v2.dtb
++qcom/polaris-mp.dtb
++qcom/sdm845-cdp.dtb
++qcom/sdm845-qrd.dtb
++qcom/sdm845-mtp.dtb
++qcom/polaris-mp-v2.1.dtb
++qcom/sdm845-4k-panel-cdp.dtb
++qcom/polaris-p1-v2.1.dtb
++qcom/polaris-p3-v2.dtb
++qcom/polaris-mp-v2.dtb
++qcom/sdm845-4k-panel-qrd.dtb
++qcom/sdm845-v2-qrd.dtb
++qcom/polaris-p1.dtb
++qcom/polaris-p2-v2.dtb
++qcom/sdm845-v2-cdp.dtb
++qcom/polaris-p3-v2.1.dtb
++qcom/sdm845-rumi.dtb

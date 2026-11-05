@@ -1,0 +1,14 @@
+Singularity v1 @ProjectNoci #1
+Mi MIX 2S / polaris / AOSP Android 13+ / downstream Linux 4.9
+KernelSU Next v1.0.9 (12797), manual static hooks.
+CPU default governor: performance. GPU default governor: performance.
+Touch boost: detected CPU policy maximum, 120 ms duration, 80 ms input interval.
+Boost requests respect the current policy maximum and release through delayed work.
+WALT schedutil: immediate up, 20 ms down hold, I/O boost.
+Bandwidth monitor: 4 ms sampling maximum; rising-traffic headroom scale 100% minimum.
+Bandwidth-zone/history caps and stale-sample underflow protection retained.
+Kernel and DTBs built together; Polaris v2 GPU table remains matched at up to 710 MHz.
+Stock OPP/voltage, thermal and hardware shutdown paths retained.
+Ramdisk, command line and boot metadata retained; no ROM-name lock.
+Parent RAW R2: user-confirmed boot on PixelOS 14 derveror 2024-08-20.
+This new #1 build still needs device boot/root/gaming validation. No FPS claim.

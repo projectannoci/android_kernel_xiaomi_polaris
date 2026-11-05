@@ -1,0 +1,18 @@
+Singularity v1 @ProjectNoci #1 / polaris
+Fresh clean-source Clang 18.1.3 kernel build: exit 0.
+Parent RAW R2: physical boot confirmed by user on PixelOS 14.0 derveror 2024-08-20.
+This #1 Image is different from the parent and contains the rebuilt gaming changes.
+All 26 source-built DTBs and their appended order exactly match the boot-confirmed R2 package.
+GPU clock-pair audit: all 14 Polaris hardware revisions pass; v2 table max remains 710 MHz.
+Effective config: KSU=y, KPROBES=n, NOCI_RAW_PERF=y, MSM_PERFORMANCE=y, CPU/GPU default performance.
+Build identity: Linux 4.9.337-Singularity-v1, ProjectNoci@Singularity, UTS build #1.
+Native C tests: input boost honors policy max and inactive boost; bandwidth rise/headroom, history/zone caps and stale sample; schedutil immediate up/20ms down: PASS.
+Static root hooks verified in all five source callsites and compiled AArch64 call relocations.
+KernelSU object has no kprobe/kretprobe registration imports.
+Installer SDK/device/format/payload/size/repack fixtures: PASS; rejected cases stop before partition write intents.
+ARM64 payload, embedded config, appended DTBs, installer syntax and ZIP CRC: PASS.
+Actual packaged ARM magiskboot under qemu-arm repacks the user-confirmed A14 boot through actual AnyKernel core; all partition writes stubbed.
+Magisk and non-Magisk installer branches: final kernel/DTB match payload; ramdisk, cmdline, header OS metadata, partition size and AVB flags preserved.
+Uploaded user boot/ROM content is not included in the source archive.
+External vendor .ko ABI audit unavailable because vendor partitions/modules were not supplied. No loadable-module configs in the generated kernel config.
+#1 physical boot, root runtime, game FPS/frame time, power and thermals: not yet tested on device. Parent boot evidence is not a benchmark or a boot guarantee for this changed build.
